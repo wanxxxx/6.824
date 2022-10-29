@@ -22,8 +22,18 @@ type ExampleReply struct {
 	Y int
 }
 
-// Add your RPC definitions here.
+type MRArgs struct {
+	MapTask    *MapTask
+	ReduceTask *ReduceTask
+}
 
+type MRReply struct {
+	MapTask    *MapTask
+	ReduceTask *ReduceTask
+	NReduce    int
+}
+
+// Add your RPC definitions here.
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.
