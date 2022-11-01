@@ -1,9 +1,9 @@
 package mr
 
 import (
-	"errors"
-	"fmt"
+	"math/rand"
 	"net/rpc"
+	"strconv"
 	"time"
 )
 import "log"
@@ -15,10 +15,6 @@ import "hash/fnv"
 // for sorting by key.
 type ByKey []KeyValue
 
-var WorkerId int64
-
-//const onceWaitTime = time.Second // todo for test
-
 // for sorting by key.
 func (a ByKey) Len() int           { return len(a) }
 func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
@@ -27,6 +23,12 @@ func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 type KeyValue struct {
 	Key   string
 	Value string
+}
+type worker struct {
+	workerId int
+	mapf     func(string, string) []KeyValue
+	reducef  func(string, []string) string
+	nReduce  int
 }
 
 // use ihash(key) % NReduce to choose the reduce
@@ -40,99 +42,81 @@ func ihash(key string) int {
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
-	WorkerId = time.Now().UnixNano()
-	log.Printf("workerid=%d)...\n", WorkerId)
+	rand.Seed(time.Now().UnixNano())
+	w := worker{
+		workerId: int(rand.Int31()),
+		//workerId: int(time.Now().UnixNano()),
+		mapf:    mapf,
+		reducef: reducef,
+	}
+
 	// Your worker implementation here.
-	args := &MRArgs{}
-	// 循环请求任务，并执行，每次请求间隔1s
+	w.start()
+
+}
+
+func (w *worker) doTask(task *MrTask) {
 	var err error
-	for {
-		reply := &MRReply{}
-		// Call for a task from coordinator
-		for i := 0; i < MAXWAITTIME; i++ {
-			err = CallCoordinator(args, reply, "AssignTask")
-			if err == nil {
-				break
-			}
-			time.Sleep(onceWaitTime)
-		}
-		if err != nil {
-			log.Printf("Exiting worker(id=%d)...\n", WorkerId)
-			return
-		}
-		// Carry out a task
-		if reply.MapTask != nil {
-			err = reply.MapTask.DoMapTask(mapf, reply.NReduce)
-		} else if reply.ReduceTask != nil {
-			err = reply.ReduceTask.DoReduceTask(reducef)
-		}
-		if err != nil {
-			log.Fatal(err)
-			return
-		}
-		/**
-		 * Notify the coordinator that the task has been finished, and
-		 * the looping make sure the task can be finished
-		 */
-		for i := 0; i < MAXWAITTIME; i++ {
-			args.MapTask, args.ReduceTask = reply.MapTask, reply.ReduceTask
-			err = CallCoordinator(args, reply, "FinishTask")
-			if err == nil {
-				if reply.MapTask != nil {
-					log.Printf("success: worker(id=%d) call for finishing the map task, filename is %v\n", WorkerId, reply.MapTask.InputFilename)
-				} else if reply.ReduceTask != nil {
-					log.Printf("success: worker(id=%d) call for finishing the reduce task, id is %v\n", WorkerId, reply.ReduceTask.Id)
-				}
-				break
-			}
-			time.Sleep(onceWaitTime)
-		}
-		if err != nil {
-			log.Printf("Exiting worker(id=%d), because it had exceeded retry count of 'FinishTask'! %v", WorkerId, err)
-			return
-		}
-		time.Sleep(onceWaitTime)
+	switch task.TaskType {
+	case MAPTYPE:
+		err = task.DoMapTask(w.mapf, w.nReduce)
+	case REDUCETYPE:
+		err = task.DoReduceTask(w.reducef)
+	default:
+		panic("error: the task type is wrong")
 	}
-
+	if err != nil {
+		panic(err)
+	}
 }
 
-func CallCoordinator(args *MRArgs, reply *MRReply, funcName string) error {
-	ok := call("Coordinator."+funcName, &args, &reply)
+/**
+ * Notify the coordinator that the task has been finished, and
+ * the looping make sure the task can be finished.
+ */
+func (w *worker) finishTask(task *MrTask) {
+	args := &MRArgs{task}
+	reply := &MRReply{}
+	for i := 0; i < MAXWAITTIME; i++ {
+		ok := call("Coordinator.FinishTask", &args, &reply)
+		if ok && reply.Task != nil && reply.Task.Status == FINISHED {
+			log.Printf("finish task(type=%d, filename=%v) by worker(id=%d)", task.TaskType, task.Filename, w.workerId)
+			return
+		}
+		time.Sleep(OnceWaitTime)
+	}
+	panic("error: fail to finish task(type=" + strconv.Itoa(task.TaskType) + ", filename=" + task.Filename + ")")
+
+}
+func (w *worker) requestTask() *MrTask {
+	args := &MRArgs{}
+	reply := &MRReply{}
+	// Looping for calling a task util success
+	ok := call("Coordinator.AssignTask", &args, &reply)
 	if !ok {
-		switch funcName {
-		case "AssignTask":
-			return errors.New("error: fail to call for task from coordinator, because the coordinator is exit or all tasks are assigned")
-		case "FinishTask":
-			return errors.New("error: fail to notify the coordinator that the task is finished")
-		}
+		log.Printf("warn: fail to request task because the coordinator done")
+		return nil
+	} else if reply.Task == nil {
+		panic("warn: reply.task is null")
+		return nil
 	}
-	return nil
+	w.nReduce = reply.NReduce
+	return reply.Task
 }
 
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-func CallExample() {
-
-	// declare an argument structure.
-	args := ExampleArgs{}
-
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	// the "Coordinator.Example" tells the
-	// receiving server that we'd like to call
-	// the Example() method of struct Coordinator.
-	ok := call("Coordinator.Example", &args, &reply)
-	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
-	} else {
-		fmt.Printf("call failed!\n")
+func (w *worker) start() {
+	defer func() { log.Printf("Exiting worker(id=%d)...", w.workerId) }()
+	for {
+		task := w.requestTask()
+		if task == nil {
+			return
+		}
+		w.doTask(task)
+		/**
+		 * Worker is stateless. T
+		 * The coordinator won't check the worker alive, it only cares about the task
+		 */
+		w.finishTask(task)
 	}
 }
 

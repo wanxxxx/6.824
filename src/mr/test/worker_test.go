@@ -5,40 +5,45 @@ import (
 	"log"
 	"sync"
 	"testing"
+	"time"
 )
 
-func TestMutiplyWorker(t *testing.T) {
-	GenerateTestData()
+func TestConcurrentWorker(t *testing.T) {
+	defer func() { log.Printf("%d %d", c.MapNum, c.ReduceNum) }()
 	wg := sync.WaitGroup{}
-	wg.Add(10)
-	for i := 0; i < 10; i++ {
+	parallel := 10
+	wg.Add(parallel)
+	for i := 0; i < parallel; i++ {
 		go WorkerFunc(&wg, i)
 	}
 	wg.Wait()
+	if c.Done() {
+		log.Printf("Success: TestConcurrentWorker")
+	} else {
+		log.Fatal("Fail: TestConcurrentWorker")
+	}
 }
+
 func WorkerFunc(wc *sync.WaitGroup, i int) {
-	//log.Printf("worker%d", i)
+	time.Sleep(time.Millisecond)
 	mr.Worker(mapf, reducef)
 	wc.Done()
 }
 func TestWorker(t *testing.T) {
-	GenerateTestData()
-	wg := sync.WaitGroup{}
-	wg.Add(10)
-	for i := 0; i < 10; i++ {
-		go mr.Worker(mapf, reducef)
-		wg.Done()
+	mr.Worker(mapf, reducef)
+	if c.Done() {
+		log.Printf("Success: TestWorker")
+	} else {
+		log.Fatal("Fail: TestWorker")
 	}
-	wg.Wait()
 }
 
 func TestCallFinishTask(t *testing.T) {
-	GenerateTestData()
 	for i := 0; i < 30; i++ {
 		reply := &mr.MRReply{}
-		err := mr.CallCoordinator(&mr.MRArgs{}, reply, "AssignTask")
-		err = mr.CallCoordinator(&mr.MRArgs{reply.MapTask, reply.ReduceTask}, reply, "FinishTask")
-		if err == nil && reply.MapTask.Status == mr.FINISHED {
+		err := c.AssignTask(&mr.MRArgs{}, reply)
+		err = c.FinishTask(&mr.MRArgs{reply.Task}, reply)
+		if err == nil && reply.Task.Status == mr.FINISHED {
 			t.Logf("Success: TestCallFinishTask")
 		} else {
 			t.Error("Fail: TestCallFinishTask")
@@ -47,12 +52,11 @@ func TestCallFinishTask(t *testing.T) {
 
 }
 func TestCallAssignTask(t *testing.T) {
-	GenerateTestData()
 	args := &mr.MRArgs{}
 	reply := &mr.MRReply{}
 	var err error
 	for i := 0; i < mr.MAXWAITTIME; i++ {
-		err = mr.CallCoordinator(args, reply, "AssignTask")
+		err = c.FinishTask(args, reply)
 		if err != nil {
 			log.Printf("warn: fail to finish the task, try again! %v\n", err)
 		} else {
@@ -62,5 +66,5 @@ func TestCallAssignTask(t *testing.T) {
 	if err != nil {
 		log.Printf("error: the worker had exceeded retry count of 'AssignTask'! %v\n", err)
 	}
-	t.Logf("Success: TestCallTask, mapid = %d\n", reply.MapTask.Id)
+	t.Logf("Success: TestCallTask, mapid = %d\n", reply.Task.Id)
 }

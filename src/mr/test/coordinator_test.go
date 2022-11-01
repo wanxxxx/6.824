@@ -9,8 +9,8 @@ import (
 func TestMakeCoordinator(t *testing.T) {
 	fmt.Println(c.MapTaskQueue.Len())
 	fmt.Println(c.ReduceTaskQueue.Len())
-	fmt.Println(len(c.AssignedMapTaskMap))
-	fmt.Println(len(c.AssignedMapTaskMap))
+	fmt.Println(len(c.AssignedMapTaskArr))
+	fmt.Println(len(c.AssignedMapTaskArr))
 	t.Log("Success: TestMakeCoordinator")
 }
 
@@ -24,14 +24,11 @@ func TestAssignTask(t *testing.T) {
 		if err != nil {
 			fmt.Printf("Failed to assign task for worker%d, %v\n", i, err)
 		}
-		if reply.MapTask != nil {
-			fmt.Printf("Assign maptask%d to worker%d\n", reply.MapTask.Id, i)
-		}
-		if reply.ReduceTask != nil {
-			fmt.Printf("Assign reducetask%d to worker%d\n", reply.ReduceTask.Id, i)
+		if reply.Task != nil {
+			fmt.Printf("Assign task(%v) to worker%d\n", reply.Task, i)
 		}
 		if i%2 == 1 {
-			args.MapTask, args.ReduceTask = reply.MapTask, reply.ReduceTask
+			args.Task, args.Task = reply.Task, reply.Task
 			c.FinishTask(args, reply)
 		}
 	}
@@ -40,41 +37,32 @@ func TestAssignTask(t *testing.T) {
 
 // 测试：正常情况结束任务
 func TestFinishTask01(t *testing.T) {
-	args := &mr.MRArgs{&mapTask, nil}
-	c.AssignedMapTaskMap[mapTask.Id] = &mapTask
+	GenerateTestData()
+	args := &mr.MRArgs{Task: &mr.MrTask{TaskType: 0, Id: 1, Status: 1}}
+	c.AssignedMapTaskArr[1] = mapTask
 	reply := &mr.MRReply{}
 	c.FinishTask(args, reply)
-	if reply.MapTask.Status == mr.FINISHED {
+	if reply.Task != nil && reply.Task.Status == mr.FINISHED {
 		t.Log("Success: TestFinishTask")
+	} else {
+		t.Error("Fail: TestFinishTask")
 	}
 }
 
 // 测试：目标任务在coordinator的assignedMap不存在
 func TestFinishTask02(t *testing.T) {
 	//generate test data...
-	GenerateTestData()
-	args := &mr.MRArgs{&mr.MapTask{1, "", 1}, nil}
+	args := &mr.MRArgs{Task: &mr.MrTask{TaskType: 1, Id: 1, Status: 1}}
 	reply := &mr.MRReply{}
-	delete(c.AssignedReduceTaskMap, 1)
-	err := c.FinishTask(args, reply)
-	if err == nil && reply.MapTask.Status == mr.FINISHED {
-		t.Log("Success: TestFinishTask")
+	delete(c.AssignedReduceTaskArr, 1)
+	c.FinishTask(args, reply)
+	if reply.Task != nil && reply.Task.Status == mr.FINISHED {
+		t.Error("Fail: TestFinishTask")
 	} else {
-		t.Error(err)
+		t.Log("Success: 测试：目标任务在coordinator的assignedMap不存在")
 	}
 }
 
-func TestDone(t *testing.T) {
-	GenerateTestData()
-	mr.Worker(mapf, reducef)
-
-	if c.Done() {
-		t.Log("Success: TestDone")
-	} else {
-		t.Error("Fail: not all tasks are done")
-	}
-
-}
 func Test(t *testing.T) {
 
 }

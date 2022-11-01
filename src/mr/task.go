@@ -21,28 +21,42 @@ const (
 	FINISHED = iota
 )
 
-type MapTask struct {
-	Id            int
-	InputFilename string
-	//OutputFilePath string
-	Status int
+//type MrTask struct {
+//	Id            int
+//	InputFilename string
+//	//OutputFilePath string
+//	Status int
+//}
+
+const (
+	MAPTYPE    = 0
+	REDUCETYPE = 1
+)
+
+type MrTask struct {
+	TaskType int // map or reduce
+	Id       int
+	Filename string // map->input file, reduce->out file
+	Status   int
 }
 
-type ReduceTask struct {
-	Id             int
-	OutputFilePath string
-	Status         int
-}
+//type MrTask struct {
+//	Id             int
+//	OutputFilePath string
+//	Status         int
+//}
 
 // DoMapTask read input file, count the word and export the Key-value pair to file named "mr-x-y"
 /**
  * The x means the id of map task, the y means the id of reduce task
  * The key-value pair may be stored to different files depend on the hash value of key
  */
-func (m *MapTask) DoMapTask(mapf func(string, string) []KeyValue, nReduce int) error {
+
+func (task *MrTask) DoMapTask(mapf func(string, string) []KeyValue, nReduce int) error {
 	// read the input file
-	filename := m.InputFilename
+	filename := task.Filename
 	file, err := os.Open(filename)
+	defer file.Close()
 	if err != nil {
 		return err
 	}
@@ -50,7 +64,6 @@ func (m *MapTask) DoMapTask(mapf func(string, string) []KeyValue, nReduce int) e
 	if err != nil {
 		return err
 	}
-	file.Close()
 
 	// do map function and sort the result
 	kva := mapf(filename, string(content))
@@ -59,12 +72,17 @@ func (m *MapTask) DoMapTask(mapf func(string, string) []KeyValue, nReduce int) e
 	/* Create tmp files to store data to different reduce partition,
 	* the number of files is equal to the number of reduce partition */
 	var tmpFiles []*os.File
+	defer func() {
+		for _, tmpFile := range tmpFiles {
+			tmpFile.Close()
+		}
+	}()
 	for i := 0; i < nReduce; i++ {
-		file, err := ioutil.TempFile("", "mr-tmp-")
+		tempFile, err := ioutil.TempFile("", "mr-tmp-")
 		if err != nil {
-			log.Fatalf("info: failed to create temp file for map task")
+			return errors.New("info: failed to create temp tempFile for map task.\n\t" + err.Error())
 		} else {
-			tmpFiles = append(tmpFiles, file)
+			tmpFiles = append(tmpFiles, tempFile)
 		}
 	}
 	// save the key-value to json string
@@ -73,34 +91,37 @@ func (m *MapTask) DoMapTask(mapf func(string, string) []KeyValue, nReduce int) e
 		enc := json.NewEncoder(tmpFiles[reduceId])
 		err = enc.Encode(&kv)
 		if err != nil {
-			return err
+			return errors.New("info: failed to save key-value to tmp file.\n\t" + err.Error())
 		}
 	}
 	// Rename the non-empty tmp file to save it
-	for i, tmpfile := range tmpFiles {
-		fileInfo, _ := tmpfile.Stat()
+	for i, tmpFile := range tmpFiles {
+		fileInfo, _ := tmpFile.Stat()
 		if fileInfo.Size() > 0 {
-			os.Rename(tmpfile.Name(), "mr-tmp-"+strconv.Itoa(m.Id)+"-"+strconv.Itoa(i))
+			err = os.Rename(tmpFile.Name(), "mr-tmp-"+strconv.Itoa(task.Id)+"-"+strconv.Itoa(i))
+			if err != nil {
+				return errors.New("info: failed to rename tmp file.\n\t" + err.Error())
+			}
 		}
 	}
 
 	return nil
 }
 
-func (r *ReduceTask) DoReduceTask(reducef func(string, []string) string) error {
-	filenames, err := GetMatchPatternFileName("mr-tmp-.-"+strconv.Itoa(r.Id), "./")
+func (task *MrTask) DoReduceTask(reducef func(string, []string) string) error {
+	inputFilenames, err := GetMatchPatternFileName("mr-tmp-\\d*-"+strconv.Itoa(task.Id)+"\\b", "./")
 	if err != nil {
 		return err
 	}
-	kva, err := Shuffle(filenames)
+	kva, err := Shuffle(inputFilenames)
+	if err != nil {
+		return err
+	}
+	ofile, err := os.Create(task.Filename)
 	if err != nil {
 		return err
 	}
 	i := 0
-	ofile, err := os.Create(r.OutputFilePath)
-	if err != nil {
-		return err
-	}
 	for i < len(kva) {
 		j := i + 1
 		for j < len(kva) && kva[j].Key == kva[i].Key {
@@ -114,9 +135,9 @@ func (r *ReduceTask) DoReduceTask(reducef func(string, []string) string) error {
 		fmt.Fprintf(ofile, "%v %v\n", kva[i].Key, output)
 		i = j
 	}
-	ofile.Close()
+	defer ofile.Close()
 	// clear tmp files
-	for _, filename := range filenames {
+	for _, filename := range inputFilenames {
 		os.Remove(filename)
 	}
 	return nil
@@ -150,11 +171,12 @@ func Shuffle(files []string) ([]KeyValue, error) {
 		dec := json.NewDecoder(inputFile)
 		for {
 			var kv KeyValue
-			if err := dec.Decode(&kv); err != nil {
+			if err = dec.Decode(&kv); err != nil {
 				break
 			}
 			kva = append(kva, kv)
 		}
+		inputFile.Close()
 	}
 	sort.Sort(ByKey(kva))
 	return kva, nil

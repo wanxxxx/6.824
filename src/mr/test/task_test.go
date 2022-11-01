@@ -2,8 +2,10 @@ package test
 
 import (
 	"6.824/mr"
+	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"plugin"
 	"sort"
 	"strconv"
@@ -13,33 +15,12 @@ import (
 )
 
 var (
-	reducef       func(key string, values []string) string
-	mapf          func(filename string, contents string) []mr.KeyValue
-	matchFiles    []string
-	testKva       []mr.KeyValue
-	nReduce       int
-	testFilenames []string
-	mapTask       mr.MapTask
-	reduceTask    mr.ReduceTask
-	c             *mr.Coordinator
-)
-
-func TestDoMapTask(t *testing.T) {
-	GenerateTestData()
-	mapTask.DoMapTask(mapf, nReduce)
-}
-
-func TestDoReduceTask(t *testing.T) {
-	reduceTask.DoReduceTask(reducef)
-}
-
-func GenerateTestData() {
 	matchFiles, _ = mr.GetMatchPatternFileName("pg-.*\\.txt", "../../main")
-	c = mr.MakeCoordinator(matchFiles, 10)
-	//c = mr.MakeCoordinator([]string{"pg-being_ernest.txt"}, 10)
-	//c    = mr.MakeCoordinator([]string{"pg-being_ernest.txt", "pg-grimm.txt"}, 10)
-	nReduce = 10
-	mapf = func(filename string, contents string) []mr.KeyValue {
+	nReduce       = 30
+	c             = mr.MakeCoordinator(matchFiles, nReduce)
+	testKva       []mr.KeyValue
+	testFilenames []string
+	mapf          = func(filename string, contents string) []mr.KeyValue {
 		// function to detect word separators.
 		ff := func(r rune) bool { return !unicode.IsLetter(r) }
 
@@ -57,28 +38,41 @@ func GenerateTestData() {
 		// return the number of occurrences of this word.
 		return strconv.Itoa(len(values))
 	}
-	//testFilenames = []string{"mr-1-0", "mr-2-0"}
-	//mapTask = mr.MapTask{0, "pg-1.txt", mr.INIT}
-	//reduceTask = mr.ReduceTask{0, "mr-out-2", mr.INIT}
+	mapTask    *mr.MrTask
+	reduceTask *mr.MrTask
+)
 
-	//
-	//testKva = append(testKva, mr.KeyValue{"a", "1"})
-	//testKva = append(testKva, mr.KeyValue{"b", "1"})
-	//testKva = append(testKva, mr.KeyValue{"c", "1"})
-	//for _, filename := range testFilenames {
-	//	file, _ := os.Create(filename)
-	//	enc := json.NewEncoder(file)
-	//	for _, kv := range testKva {
-	//		enc.Encode(&kv)
-	//	}
-	//}
-	//
-	//file, _ := os.Create(mapTask.InputFilename)
-	//file.Write([]byte("mapone maptwo mapthree"))
+func TestDoMapTask(t *testing.T) {
+	mapTask := &mr.MrTask{0, 1, "pg-being_ernest.txt", 0}
+	mapTask.DoMapTask(mapf, nReduce)
+}
+
+func TestDoReduceTask(t *testing.T) {
+	reduceTask := &mr.MrTask{1, 1, "mr-out-1", 0}
+	reduceTask.DoReduceTask(reducef)
+}
+
+func GenerateTestData() {
+	testFilenames = []string{"mr-1-0", "mr-2-0"}
+
+	mapTask = &mr.MrTask{0, 0, "pg-being_ernest.txt", mr.INIT}
+	reduceTask = &mr.MrTask{1, 0, "mr-out-0", mr.INIT}
+
+	testKva = append(testKva, mr.KeyValue{"a", "1"})
+	testKva = append(testKva, mr.KeyValue{"b", "1"})
+	testKva = append(testKva, mr.KeyValue{"c", "1"})
+	for _, filename := range testFilenames {
+		file, _ := os.Create(filename)
+		enc := json.NewEncoder(file)
+		for _, kv := range testKva {
+			enc.Encode(&kv)
+		}
+	}
+	file, _ := os.Create(mapTask.Filename)
+	file.Write([]byte("mapone maptwo mapthree"))
 
 }
 func TestGetMatchPatternFileName(t *testing.T) {
-	GenerateTestData()
 	dir := ""
 	pattern := "mr-\\d-0"
 	matchFiles, _ = mr.GetMatchPatternFileName(pattern, dir)
