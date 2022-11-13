@@ -144,7 +144,7 @@ func (cfg *config) checkLogs(i int, m ApplyMsg) (string, bool) {
 		if old, oldok := cfg.logs[j][m.CommandIndex]; oldok && old != v {
 			log.Printf("%v: log %v; server %v\n", i, cfg.logs[i], cfg.logs[j])
 			// some server has already committed a different value for this entry!
-			err_msg = fmt.Sprintf("commit index=%v server=%v %v != server=%v %v",
+			err_msg = fmt.Sprintf("commit Index=%v server=%v %v != server=%v %v",
 				m.CommandIndex, i, m.Command, j, old)
 		}
 	}
@@ -227,7 +227,7 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 			}
 		} else if m.CommandValid {
 			if m.CommandIndex != cfg.lastApplied[i]+1 {
-				err_msg = fmt.Sprintf("server %v apply out of order, expected index %v, got %v", i, cfg.lastApplied[i]+1, m.CommandIndex)
+				err_msg = fmt.Sprintf("server %v apply out of order, expected Index %v, got %v", i, cfg.lastApplied[i]+1, m.CommandIndex)
 			}
 
 			if err_msg == "" {
@@ -354,11 +354,14 @@ func (cfg *config) cleanup() {
 	}
 	cfg.net.Cleanup()
 	cfg.checkTimeout()
+	for i := 0; i < len(cfg.rafts); i++ {
+		log.Println(cfg.rafts[i].toString())
+	}
 }
 
 // attach server i to the net.
 func (cfg *config) connect(i int) {
-	// fmt.Printf("connect(%d)\n", i)
+	fmt.Printf("connect(%d)\n", i)
 
 	cfg.connected[i] = true
 
@@ -381,7 +384,7 @@ func (cfg *config) connect(i int) {
 
 // detach server i from the net.
 func (cfg *config) disconnect(i int) {
-	// fmt.Printf("disconnect(%d)\n", i)
+	fmt.Printf("disconnect(%d)\n", i)
 
 	cfg.connected[i] = false
 
@@ -432,6 +435,7 @@ func (cfg *config) setlongreordering(longrel bool) {
 func (cfg *config) checkOneLeader() int {
 	for iters := 0; iters < 10; iters++ {
 		ms := 450 + (rand.Int63() % 100)
+		//ms := 100 + (rand.Int63() % 100)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
 		leaders := make(map[int][]int)
@@ -446,7 +450,7 @@ func (cfg *config) checkOneLeader() int {
 		lastTermWithLeader := -1
 		for term, leaders := range leaders {
 			if len(leaders) > 1 {
-				cfg.t.Fatalf("term %d has %d (>1) leaders", term, len(leaders))
+				cfg.t.Fatalf("Term %d has %d (>1) leaders(%v)", term, len(leaders), leaders)
 			}
 			if term > lastTermWithLeader {
 				lastTermWithLeader = term
@@ -454,6 +458,7 @@ func (cfg *config) checkOneLeader() int {
 		}
 
 		if len(leaders) != 0 {
+			fmt.Printf("Just one leader(%d)\n", leaders[lastTermWithLeader][0])
 			return leaders[lastTermWithLeader][0]
 		}
 	}
@@ -461,7 +466,7 @@ func (cfg *config) checkOneLeader() int {
 	return -1
 }
 
-// check that everyone agrees on the term.
+// check that everyone agrees on the Term.
 func (cfg *config) checkTerms() int {
 	term := -1
 	for i := 0; i < cfg.n; i++ {
@@ -470,7 +475,7 @@ func (cfg *config) checkTerms() int {
 			if term == -1 {
 				term = xterm
 			} else if term != xterm {
-				cfg.t.Fatalf("servers disagree on term")
+				cfg.t.Fatalf(cfg.rafts[i].toString()+" disagree on Term %d", term)
 			}
 		}
 	}
@@ -487,6 +492,8 @@ func (cfg *config) checkNoLeader() {
 			_, is_leader := cfg.rafts[i].GetState()
 			if is_leader {
 				cfg.t.Fatalf("expected no leader among connected servers, but %v claims to be leader", i)
+			} else {
+				fmt.Println("No leader")
 			}
 		}
 	}
@@ -507,7 +514,7 @@ func (cfg *config) nCommitted(index int) (int, interface{}) {
 
 		if ok {
 			if count > 0 && cmd != cmd1 {
-				cfg.t.Fatalf("committed values do not match: index %v, %v, %v",
+				cfg.t.Fatalf("committed values do not match: Index %v, %v, %v",
 					index, cmd, cmd1)
 			}
 			count += 1
@@ -542,7 +549,7 @@ func (cfg *config) wait(index int, n int, startTerm int) interface{} {
 	}
 	nd, cmd := cfg.nCommitted(index)
 	if nd < n {
-		cfg.t.Fatalf("only %d decided for index %d; wanted %d",
+		cfg.t.Fatalf("only %d decided for Index %d; wanted %d",
 			nd, index, n)
 	}
 	return cmd
@@ -555,7 +562,7 @@ func (cfg *config) wait(index int, n int, startTerm int) interface{} {
 // indirectly checks that the servers agree on the
 // same value, since nCommitted() checks this,
 // as do the threads that read from applyCh.
-// returns index.
+// returns Index.
 // if retry==true, may submit the command multiple
 // times, in case a leader fails just after Start().
 // if retry==false, calls Start() only once, in order
