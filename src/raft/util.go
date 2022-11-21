@@ -18,6 +18,13 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 
 func MaxInt(num1, num2 int) int {
 	if num1 > num2 {
+		return num1
+	}
+	return num2
+}
+
+func MinInt(num1, num2 int) int {
+	if num1 > num2 {
 		return num2
 	}
 	return num1
