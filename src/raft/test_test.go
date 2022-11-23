@@ -8,7 +8,9 @@ package raft
 // test with the original before submitting.
 //
 
-import "testing"
+import (
+	"testing"
+)
 import "fmt"
 import "time"
 import "math/rand"
@@ -479,32 +481,42 @@ func TestRejoin2B(t *testing.T) {
 
 	cfg.begin("Test (2B): rejoin of partitioned leader")
 
-	cfg.one(101, servers, true)
+	cfg.one(101, servers, true) // leader1 commit (1,1,100)
 
 	// leader network failure
 	leader1 := cfg.checkOneLeader()
 	cfg.disconnect(leader1)
-
+	fmt.Println("disconnect leader1")
 	// make old leader try to agree on some entries
-	cfg.rafts[leader1].Start(102)
-	cfg.rafts[leader1].Start(103)
-	cfg.rafts[leader1].Start(104)
+	cfg.rafts[leader1].Start(102) // leader1 receive (2,1,102)
+	cfg.rafts[leader1].Start(103) // leader1 receive (3,1,103)
+	cfg.rafts[leader1].Start(104) // leader1 receive (4,1,104)
 
 	// new leader commits, also for index=2
-	cfg.one(103, 2, true)
-
+	cfg.one(103, 2, true) //leader2 commit (2,2,103)
+	// ...new leader has 101 and 103
 	// new leader network failure
 	leader2 := cfg.checkOneLeader()
 	cfg.disconnect(leader2)
+	fmt.Println("disconnect leader2")
 
 	// old leader connected again
 	cfg.connect(leader1)
-
+	fmt.Println("connect leader1")
+	// ...old leader has
+	// old leader will receive 104, but follower will deny replica
+	// leader1 receive (5,1,104) and send to follower, find its term is lower, then leader1 turn into a follower
+	// then 1. follower receive (3,3,104)
+	// 		2. leader1 receive (6,3,104)
 	cfg.one(104, 2, true)
+	leader3 := cfg.checkOneLeader()
 
+	if leader3 == leader1 {
+		t.Fatalf("server%d cannot be leader, because its log outdate", leader1)
+	}
 	// all together now
 	cfg.connect(leader2)
-
+	fmt.Println("connect leader2")
 	cfg.one(105, servers, true)
 
 	cfg.end()
@@ -530,10 +542,19 @@ func TestBackup2B(t *testing.T) {
 		cfg.rafts[leader1].Start(rand.Int())
 	}
 
-	time.Sleep(RaftElectionTimeout / 2)
+	time.Sleep(RaftElectionTimeout * 2)
 
 	cfg.disconnect((leader1 + 0) % servers)
 	cfg.disconnect((leader1 + 1) % servers)
+
+	//if cfg.rafts[leader1].getLastIndex() == 51 || cfg.rafts[(leader1+1)%servers].getLastIndex() == 51 {
+	//	t.Fatalf("%v\n%v\n%v", cfg.rafts[leader1].log, cfg.rafts[(leader1+1)%servers].log, cfg.logs)
+	//}
+	//for _, log := range cfg.logs {
+	//	if len(log) != 1 {
+	//		t.Fatalf("%v\n%v\n%v", cfg.rafts[leader1].log, cfg.rafts[(leader1+1)%servers].log, cfg.logs)
+	//	}
+	//}
 
 	// allow other partition to recover
 	cfg.connect((leader1 + 2) % servers)

@@ -137,19 +137,19 @@ func (cfg *config) crash1(i int) {
 	}
 }
 
-func (cfg *config) checkLogs(i int, m ApplyMsg) (string, bool) {
+func (cfg *config) checkLogs(serverId int, m ApplyMsg) (string, bool) {
 	err_msg := ""
 	v := m.Command
 	for j := 0; j < len(cfg.logs); j++ {
 		if old, oldok := cfg.logs[j][m.CommandIndex]; oldok && old != v {
-			log.Printf("%v: log %v; server %v\n", i, cfg.logs[i], cfg.logs[j])
+			log.Printf("server(%v) logs=%v; server(%v) logs=%v\n", serverId, cfg.logs[serverId], j, cfg.logs[j])
 			// some server has already committed a different value for this entry!
-			err_msg = fmt.Sprintf("commit index=%v server=%v %v != server=%v %v",
-				m.CommandIndex, i, m.Command, j, old)
+			err_msg = fmt.Sprintf("logIndex=%v; %v(from server%d) != %v (from server%v)",
+				m.CommandIndex, m.Command, serverId, old, j)
 		}
 	}
-	_, prevok := cfg.logs[i][m.CommandIndex-1]
-	cfg.logs[i][m.CommandIndex] = v
+	_, prevok := cfg.logs[serverId][m.CommandIndex-1]
+	cfg.logs[serverId][m.CommandIndex] = v
 	if m.CommandIndex > cfg.maxIndex {
 		cfg.maxIndex = m.CommandIndex
 	}
@@ -593,7 +593,7 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 			// somebody claimed to be the leader and to have
 			// submitted our command; wait a while for agreement.
 			t1 := time.Now()
-			for time.Since(t1).Seconds() < 2 {
+			for time.Since(t1).Seconds() < 5 {
 				nd, cmd1 := cfg.nCommitted(index)
 				if nd > 0 && nd >= expectedServers {
 					// committed

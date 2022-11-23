@@ -22,8 +22,20 @@ func MaxInt(num1, num2 int) int {
 	}
 	return num2
 }
+func MaxInt64(num1, num2 int64) int64 {
+	if num1 > num2 {
+		return num1
+	}
+	return num2
+}
 
 func MinInt(num1, num2 int) int {
+	if num1 > num2 {
+		return num2
+	}
+	return num1
+}
+func MinInt64(num1, num2 int64) int64 {
 	if num1 > num2 {
 		return num2
 	}
@@ -33,4 +45,15 @@ func MinInt(num1, num2 int) int {
 func getRandTime(start, end int) time.Duration {
 	rand.Seed(time.Now().UnixNano())
 	return TIME_UNIT * time.Duration(rand.Intn(end-start)+start)
+}
+
+func (log1 *LogEntry) compare(log2 *LogEntry) int {
+	return compareLog(log1.Term, log2.Term, log1.Index, log2.Index)
+}
+
+func compareLog(term1, term2 int, index1, index2 int64) int {
+	if term1 != term2 {
+		return term1 - term2
+	}
+	return int(index1 - index2)
 }
