@@ -20,6 +20,8 @@ package raft
 import (
 	"fmt"
 	"log"
+	"math"
+
 	//	"bytes"
 	"sync"
 	"sync/atomic"
@@ -45,7 +47,7 @@ const (
 	MIN_ElECTION_MS = 1000
 	MAX_ElECTION_MS = 1500
 	TIME_UNIT       = time.Millisecond // todo
-	BROADCAST_TIME  = 10               // 一个服务器将RPC并行发给集群中所有服务器（不包括其自身）并收到响应的平均时间，由机器本身特性决定
+	BROADCAST_TIME  = 50 * TIME_UNIT   // 一个服务器将RPC并行发给集群中所有服务器（不包括其自身）并收到响应的平均时间，由机器本身特性决定
 	FOLLOWER        = 0
 	LEADER          = 1
 	CANDIDATE       = 2
@@ -150,7 +152,7 @@ func (rf *Raft) isHeartBeat() bool {
 	time.Sleep(randTime)
 	nowTime := time.Now()
 	if nowTime.Sub(rf.lastHeartbeat) > randTime && !rf.isLeader() {
-		fmt.Printf(rf.toString()+" timeout=%v, nowTime=%v\n", randTime, nowTime.Format("15:04:05.00"))
+		//fmt.Printf(rf.toString()+" timeout=%v, nowTime=%v\n", randTime, nowTime.Format("15:04:05.00"))
 		return false
 	}
 	//log.Printf(rf.toString() + " received heartbeat...")
@@ -366,9 +368,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		// and the election in lower term should be stopped immediately
 		// So, we treat this vote as a heartbeat to reduce election competition
 		// and then this candidate will turn into a follower in afterRPC
-		if rf.state == CANDIDATE { // args.Term must > rf.currentTerm, rf need to terminate election
-			rf.lastHeartbeat = time.Now()
-		}
+		// args.Term must > rf.currentTerm, rf need to terminate election
+		//if rf.state == CANDIDATE {
+		rf.lastHeartbeat = time.Now()
+		//}
 		ok := atomic.CompareAndSwapInt64(&rf.voteFor, -1, int64(args.CandidateId))
 		if ok {
 			reply.VoteGranted, reply.Term = true, args.Term
@@ -410,13 +413,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 					i++
 					j++
 				} else {
+					rf.log = append(rf.log[:j])
 					log.Printf(rf.toString()+" abondon logs(%d-%d) which inconsistent with leader(%d)", j, rf.getLastIndex(), args.LeaderId)
 					break
 				}
 			}
 			// Append any new entries not already in the log
-			rf.log = append(rf.log[:j], args.Entries[i:]...) // args.Entries[i] != rf.log[j]
 			if i < len(args.Entries) {
+				rf.log = append(rf.log, args.Entries[i:]...) // args.Entries[i] != rf.log[j]
 				log.Printf(rf.toString()+" receive logs(%d-%d) from leader(%d)", args.Entries[i].Index, args.Entries[len(args.Entries)-1].Index, args.LeaderId)
 			}
 		}
@@ -442,7 +446,7 @@ func (rf *Raft) sendRequestVoteRPC(server int, args *RequestVoteArgs, reply *Req
 	}
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	if !ok {
-		log.Printf(" (id=%d, term=%d) requestVote RPC failed from server(id=%d)", args.CandidateId, args.Term, server)
+		//log.Printf(" (id=%d, term=%d) requestVote RPC failed from server(id=%d)", args.CandidateId, args.Term, server)
 	} else {
 		//log.Printf(" (id=%d, term=%d) requestVote RPC response from server(id=%d)", args.CandidateId, args.Term, server)
 	}
@@ -451,6 +455,7 @@ func (rf *Raft) sendRequestVoteRPC(server int, args *RequestVoteArgs, reply *Req
 }
 
 func (rf *Raft) sendAppendEntriesRPC(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+
 	if !rf.isLeader() {
 		//log.Println(rf.toString() + " isn't leader, so can't send AppendEntries RPC")
 		return false
@@ -513,28 +518,28 @@ func (rf *Raft) sendLogTo(server int) {
 				break
 			}
 			// If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
-			if rf.getLastIndex() < nextIndex {
-				//time.Sleep(BROADCAST_TIME)
-				continue
-			}
-			args := &AppendEntriesArgs{rf.currentTerm, rf.me, nextIndex - 1, rf.log[nextIndex-1].Term, rf.log[nextIndex:], rf.commitIndex}
-			reply := &AppendEntriesReply{}
-			ok := rf.sendAppendEntriesRPC(server, args, reply)
-			if ok && reply.Success {
-				// Success to replicate: nextIndex = last log+1, matchIndex=last log
-				lastLogIndex := args.Entries[len(args.Entries)-1].Index
-				oldMatch := rf.matchIndex[server]
-				if atomic.CompareAndSwapInt64(&rf.nextIndex[server], nextIndex, lastLogIndex+1) &&
-					oldMatch < lastLogIndex && atomic.CompareAndSwapInt64(&rf.matchIndex[server], oldMatch, lastLogIndex) {
-					rf.checkCommit()
-					//log.Printf(rf.toString()+" success to send logs(%d-%d) to server(%d)", args.Entries[0].Index, args.Entries[len(args.Entries)-1].Index, server)
+			if rf.getLastIndex() >= nextIndex {
+				args := &AppendEntriesArgs{rf.currentTerm, rf.me, nextIndex - 1, rf.log[nextIndex-1].Term, rf.log[nextIndex:], rf.commitIndex}
+				reply := &AppendEntriesReply{}
+				//fmt.Printf("sendLogTo\n")
+				ok := rf.sendAppendEntriesRPC(server, args, reply)
+				if ok && reply.Success {
+					// Success to replicate: nextIndex = last log+1, matchIndex=last log
+					lastLogIndex := args.Entries[len(args.Entries)-1].Index
+					oldMatch := rf.matchIndex[server]
+					if atomic.CompareAndSwapInt64(&rf.nextIndex[server], nextIndex, lastLogIndex+1) &&
+						oldMatch < lastLogIndex && atomic.CompareAndSwapInt64(&rf.matchIndex[server], oldMatch, lastLogIndex) {
+						rf.checkCommit()
+						//log.Printf(rf.toString()+" success to send logs(%d-%d) to server(%d)", args.Entries[0].Index, args.Entries[len(args.Entries)-1].Index, server)
+					}
+				} else if ok {
+					// Fail to replicate, nextIndex--
+					if atomic.CompareAndSwapInt64(&rf.nextIndex[server], nextIndex, nextIndex-1) {
+						log.Printf(rf.toString()+" preLog(%d) is inconsistent with (id=%d), decrements nextIndex to %d", args.PrevLogIndex, server, nextIndex-1)
+					}
 				}
-			} else if ok {
-				// Fail to replicate, nextIndex--
-				if atomic.CompareAndSwapInt64(&rf.nextIndex[server], nextIndex, nextIndex-1) {
-					log.Printf(rf.toString()+" preLog(%d) is inconsistent with (id=%d), decrements nextIndex to %d", args.PrevLogIndex, server, nextIndex-1)
-				}
 			}
+			time.Sleep(BROADCAST_TIME)
 		}
 	}()
 }
@@ -545,6 +550,7 @@ func (rf *Raft) sendHeartBeatTo(server int) {
 			nextIndex := rf.nextIndex[server]
 			args := &AppendEntriesArgs{rf.currentTerm, rf.me, nextIndex - 1, rf.log[nextIndex-1].Term, nil, rf.commitIndex}
 			reply := &AppendEntriesReply{}
+			//fmt.Printf(rf.toString()+" sendHeartBeatTo %d\n", server)
 			ok := rf.sendAppendEntriesRPC(server, args, reply)
 			// PreIndex is inconsistent, nextIndex--
 			if ok && !reply.Success &&
@@ -662,32 +668,44 @@ func (rf *Raft) checkCommit() {
 		// The next index which need to be committed is the rf.commitIndex(as j) + 1
 		// if matchIndex[i] > j, it means the logs which index between [j+1,matchIndex[i]] are replicated to server i
 		count := 0
-		targetIndex := rf.commitIndex + 1
+		oldCommitIndex := rf.commitIndex
+		targetIndex := int64(math.MaxInt64)
 		for _, index := range rf.matchIndex {
-			if index >= targetIndex {
+			if index > oldCommitIndex {
+				targetIndex = MinInt64(targetIndex, index)
 				count++
 			}
 		}
 		if count > len(rf.peers)/2 {
-			oldIndex := rf.commitIndex
-			if targetIndex > oldIndex {
+			if targetIndex > oldCommitIndex {
 				//rf.commitIndex = targetIndex
 				if rf.updateCommit(targetIndex) {
 					log.Printf(rf.toString()+" update commit to %d, because replicated to majority", targetIndex)
 				}
 			}
 		}
+		//targetIndex := int64(math.MaxInt64)
+		//for _, index := range rf.matchIndex {
+		//	targetIndex = MinInt64(index, targetIndex)
+		//}
+		//oldCommitIndex := rf.commitIndex
+		//if targetIndex > oldCommitIndex {
+		//	//rf.commitIndex = targetIndex
+		//	if rf.updateCommit(targetIndex) {
+		//		log.Printf(rf.toString()+" update commit to %d, because replicated to majority", targetIndex)
+		//	}
+		//}
 	}
 
 }
 
 // For all server apply new committed logs after update of commitIndex
 func (rf *Raft) applyEntry() {
-	for i := rf.lastAppliedIndex + 1; i <= rf.commitIndex; i++ {
+	for i := rf.lastAppliedIndex + 1; i <= rf.commitIndex && rf.applyCh != nil; i++ {
 		rf.applyCh <- ApplyMsg{Command: rf.log[i].Command, CommandValid: true, CommandIndex: int(i)}
 		rf.lastAppliedIndex = i
-		log.Printf(rf.toString()+" applied log(%d)...\n", i)
 	}
+	log.Printf(rf.toString()+" applied log(%d)...\n", rf.lastAppliedIndex)
 }
 
 func (rf *Raft) commitLog(index int) {

@@ -536,7 +536,11 @@ func TestBackup2B(t *testing.T) {
 	cfg.disconnect((leader1 + 2) % servers)
 	cfg.disconnect((leader1 + 3) % servers)
 	cfg.disconnect((leader1 + 4) % servers)
-
+	for i, log := range cfg.logs {
+		if len(log) != 1 {
+			t.Fatalf("%d", i)
+		}
+	}
 	// submit lots of commands that won't commit
 	for i := 0; i < 50; i++ {
 		cfg.rafts[leader1].Start(rand.Int())
@@ -547,20 +551,22 @@ func TestBackup2B(t *testing.T) {
 	cfg.disconnect((leader1 + 0) % servers)
 	cfg.disconnect((leader1 + 1) % servers)
 
-	//if cfg.rafts[leader1].getLastIndex() == 51 || cfg.rafts[(leader1+1)%servers].getLastIndex() == 51 {
-	//	t.Fatalf("%v\n%v\n%v", cfg.rafts[leader1].log, cfg.rafts[(leader1+1)%servers].log, cfg.logs)
-	//}
-	//for _, log := range cfg.logs {
-	//	if len(log) != 1 {
-	//		t.Fatalf("%v\n%v\n%v", cfg.rafts[leader1].log, cfg.rafts[(leader1+1)%servers].log, cfg.logs)
-	//	}
-	//}
+	for i := 0; i <= 1; i++ {
+		if cfg.rafts[(leader1+i)%servers].getLastIndex() != 51 {
+			t.Fatalf("%d", i)
+		}
+	}
+	// check one log commit
+	for i := 0; i < servers; i++ {
+		if len(cfg.logs[i]) != 1 {
+			t.Fatalf("%d", i)
+		}
+	}
 
 	// allow other partition to recover
 	cfg.connect((leader1 + 2) % servers)
 	cfg.connect((leader1 + 3) % servers)
 	cfg.connect((leader1 + 4) % servers)
-
 	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {
 		cfg.one(rand.Int(), 3, true)
@@ -568,6 +574,7 @@ func TestBackup2B(t *testing.T) {
 
 	// now another partitioned leader and one follower
 	leader2 := cfg.checkOneLeader()
+
 	other := (leader1 + 2) % servers
 	if leader2 == other {
 		other = (leader2 + 1) % servers
@@ -606,21 +613,19 @@ func TestBackup2B(t *testing.T) {
 func TestCount2B(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
-	defer cfg.cleanup()
-
-	cfg.begin("Test (2B): RPC counts aren't too high")
-
 	rpcs := func() (n int) {
 		for j := 0; j < servers; j++ {
 			n += cfg.rpcCount(j)
 		}
 		return
 	}
+	defer cfg.cleanup()
+	rpcs()
+	cfg.begin("Test (2B): RPC counts aren't too high")
 
 	leader := cfg.checkOneLeader()
 
 	total1 := rpcs()
-
 	if total1 > 30 || total1 < 1 {
 		t.Fatalf("too many or few RPCs (%v) to elect initial leader\n", total1)
 	}
