@@ -57,3 +57,15 @@ func compareLog(term1, term2 int, index1, index2 int64) int {
 	}
 	return int(index1 - index2)
 }
+
+func compareLogs(e1, e2 []*LogEntry) bool {
+	if len(e1) != len(e2) {
+		return false
+	}
+	for i := 0; i < len(e1); i++ {
+		if e1[i].compare(e2[i]) != 0 {
+			return false
+		}
+	}
+	return true
+}

@@ -142,7 +142,7 @@ func (cfg *config) checkLogs(serverId int, m ApplyMsg) (string, bool) {
 	v := m.Command
 	for j := 0; j < len(cfg.logs); j++ {
 		if old, oldok := cfg.logs[j][m.CommandIndex]; oldok && old != v {
-			log.Printf("server(%v) logs=%v; server(%v) logs=%v\n", serverId, cfg.logs[serverId], j, cfg.logs[j])
+			log.Printf("server(%v) logs=%v; \nserver(%v) logs=%v\n", serverId, cfg.logs[serverId], j, cfg.logs[j])
 			// some server has already committed a different value for this entry!
 			err_msg = fmt.Sprintf("logIndex=%v; %v(from server%d) != %v (from server%v)",
 				m.CommandIndex, m.Command, serverId, old, j)
@@ -354,14 +354,14 @@ func (cfg *config) cleanup() {
 	}
 	cfg.net.Cleanup()
 	cfg.checkTimeout()
-	for i := 0; i < len(cfg.rafts); i++ {
-		log.Println(cfg.rafts[i].toString())
-	}
+	//for i := 0; i < len(cfg.rafts); i++ {
+	//	log.Println(cfg.rafts[i].toString())
+	//}
 }
 
 // attach server i to the net.
 func (cfg *config) connect(i int) {
-	fmt.Printf("connect(%d)\n", i)
+	//fmt.Printf("connect(%d)\n", i)
 
 	cfg.connected[i] = true
 
@@ -384,7 +384,7 @@ func (cfg *config) connect(i int) {
 
 // detach server i from the net.
 func (cfg *config) disconnect(i int) {
-	fmt.Printf("disconnect(%d)\n", i)
+	//fmt.Printf("disconnect(%d)\n", i)
 
 	cfg.connected[i] = false
 
@@ -457,7 +457,7 @@ func (cfg *config) checkOneLeader() int {
 		}
 
 		if len(leaders) != 0 {
-			fmt.Printf("Just one leader(%d)\n", leaders[lastTermWithLeader][0])
+			//fmt.Printf("Just one leader(%d)\n", leaders[lastTermWithLeader][0])
 			return leaders[lastTermWithLeader][0]
 		}
 	}

@@ -486,7 +486,6 @@ func TestRejoin2B(t *testing.T) {
 	// leader network failure
 	leader1 := cfg.checkOneLeader()
 	cfg.disconnect(leader1)
-	fmt.Println("disconnect leader1")
 	// make old leader try to agree on some entries
 	cfg.rafts[leader1].Start(102) // leader1 receive (2,1,102)
 	cfg.rafts[leader1].Start(103) // leader1 receive (3,1,103)
@@ -498,11 +497,11 @@ func TestRejoin2B(t *testing.T) {
 	// new leader network failure
 	leader2 := cfg.checkOneLeader()
 	cfg.disconnect(leader2)
-	fmt.Println("disconnect leader2")
+	//fmt.Println("disconnect leader2")
 
 	// old leader connected again
 	cfg.connect(leader1)
-	fmt.Println("connect leader1")
+	//fmt.Println("connect leader1")
 	// ...old leader has
 	// old leader will receive 104, but follower will deny replica
 	// leader1 receive (5,1,104) and send to follower, find its term is lower, then leader1 turn into a follower
@@ -516,7 +515,7 @@ func TestRejoin2B(t *testing.T) {
 	}
 	// all together now
 	cfg.connect(leader2)
-	fmt.Println("connect leader2")
+	//fmt.Println("connect leader2")
 	cfg.one(105, servers, true)
 
 	cfg.end()
@@ -735,10 +734,22 @@ func TestPersist12C(t *testing.T) {
 		cfg.disconnect(i)
 		cfg.connect(i)
 	}
+	// code of me
+	for i := 0; i < servers; i++ {
+		if cfg.rafts[i].log[1].Command != 11 {
+			t.Fatalf("")
+		}
+	}
 
 	cfg.one(12, servers, true)
 
 	leader1 := cfg.checkOneLeader()
+	// code of me
+	for i := 0; i < servers; i++ {
+		if cfg.rafts[i].log[2].Command != 12 {
+			t.Fatalf("")
+		}
+	}
 	cfg.disconnect(leader1)
 	cfg.start1(leader1, cfg.applier)
 	cfg.connect(leader1)
@@ -746,7 +757,14 @@ func TestPersist12C(t *testing.T) {
 	cfg.one(13, servers, true)
 
 	leader2 := cfg.checkOneLeader()
+
 	cfg.disconnect(leader2)
+	// code of me
+	for i := 0; i < servers; i++ {
+		if cfg.rafts[i].log[3].Command != 13 {
+			t.Fatalf("")
+		}
+	}
 	cfg.one(14, servers-1, true)
 	cfg.start1(leader2, cfg.applier)
 	cfg.connect(leader2)
@@ -773,6 +791,11 @@ func TestPersist22C(t *testing.T) {
 
 	index := 1
 	for iters := 0; iters < 5; iters++ {
+		fmt.Printf("---round %d\n", iters)
+		logCount := make([]int64, servers)
+		for i := 0; i < servers; i++ {
+			logCount[i] = cfg.rafts[i].getLastIndex()
+		}
 		cfg.one(10+index, servers, true)
 		index++
 
@@ -794,13 +817,37 @@ func TestPersist22C(t *testing.T) {
 		cfg.connect((leader1 + 2) % servers)
 
 		time.Sleep(RaftElectionTimeout)
-
+		//// 0x 1 2 3x 4x
+		//// 2  1 1 2  2
+		//for i := 0; i < servers; i++ {
+		//	if i == (leader1+1)%servers || i == (leader1+2)%servers {
+		//		if cfg.rafts[i].getLastIndex()-logCount[i] != 1 {
+		//			t.Fatalf("")
+		//		}
+		//	} else {
+		//		if cfg.rafts[i].getLastIndex()-logCount[i] != 2 {
+		//			t.Fatalf("")
+		//		}
+		//	}
+		//}
 		cfg.start1((leader1+3)%servers, cfg.applier)
 		cfg.connect((leader1 + 3) % servers)
 
 		cfg.one(10+index, servers-2, true)
 		index++
 
+		// 0x 1 2 3 4x
+		// 2  3 3 3  2
+		//for i := 0; i < servers; i++ {
+		//	if i == (leader1+0)%servers || i == (leader1+4)%servers {
+		//		if cfg.rafts[i].getLastIndex()-logCount[i] != 2 {
+		//			t.Fatalf("")
+		//		}
+		//	} else if cfg.rafts[i].getLastIndex()-logCount[i] != 3 {
+		//		t.Fatalf("")
+		//
+		//	}
+		//}
 		cfg.connect((leader1 + 4) % servers)
 		cfg.connect((leader1 + 0) % servers)
 	}
@@ -860,7 +907,7 @@ func TestFigure82C(t *testing.T) {
 	cfg.one(rand.Int(), 1, true)
 
 	nup := servers
-	for iters := 0; iters < 1000; iters++ {
+	for iters := 0; iters < 3000; iters++ {
 		leader := -1
 		for i := 0; i < servers; i++ {
 			if cfg.rafts[i] != nil {
