@@ -137,19 +137,19 @@ func (cfg *config) crash1(i int) {
 	}
 }
 
-func (cfg *config) checkLogs(serverId int, m ApplyMsg) (string, bool) {
+func (cfg *config) checkLogs(i int, m ApplyMsg) (string, bool) {
 	err_msg := ""
 	v := m.Command
 	for j := 0; j < len(cfg.logs); j++ {
 		if old, oldok := cfg.logs[j][m.CommandIndex]; oldok && old != v {
-			log.Printf("server(%v) logs=%v; \nserver(%v) logs=%v\n", serverId, cfg.logs[serverId], j, cfg.logs[j])
+			log.Printf("%v: log %v; server %v\n", i, cfg.logs[i], cfg.logs[j])
 			// some server has already committed a different value for this entry!
-			err_msg = fmt.Sprintf("logIndex=%v; %v(from server%d) != %v (from server%v)",
-				m.CommandIndex, m.Command, serverId, old, j)
+			err_msg = fmt.Sprintf("commit index=%v server=%v %v != server=%v %v",
+				m.CommandIndex, i, m.Command, j, old)
 		}
 	}
-	_, prevok := cfg.logs[serverId][m.CommandIndex-1]
-	cfg.logs[serverId][m.CommandIndex] = v
+	_, prevok := cfg.logs[i][m.CommandIndex-1]
+	cfg.logs[i][m.CommandIndex] = v
 	if m.CommandIndex > cfg.maxIndex {
 		cfg.maxIndex = m.CommandIndex
 	}
@@ -354,14 +354,11 @@ func (cfg *config) cleanup() {
 	}
 	cfg.net.Cleanup()
 	cfg.checkTimeout()
-	//for i := 0; i < len(cfg.rafts); i++ {
-	//	log.Println(cfg.rafts[i].toString())
-	//}
 }
 
 // attach server i to the net.
 func (cfg *config) connect(i int) {
-	//fmt.Printf("connect(%d)\n", i)
+	// fmt.Printf("connect(%d)\n", i)
 
 	cfg.connected[i] = true
 
@@ -384,7 +381,7 @@ func (cfg *config) connect(i int) {
 
 // detach server i from the net.
 func (cfg *config) disconnect(i int) {
-	//fmt.Printf("disconnect(%d)\n", i)
+	// fmt.Printf("disconnect(%d)\n", i)
 
 	cfg.connected[i] = false
 
@@ -433,7 +430,7 @@ func (cfg *config) setlongreordering(longrel bool) {
 // try a few times in case re-elections are needed.
 //
 func (cfg *config) checkOneLeader() int {
-	for iters := 0; iters < 100; iters++ {
+	for iters := 0; iters < 10; iters++ {
 		ms := 450 + (rand.Int63() % 100)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
@@ -457,7 +454,6 @@ func (cfg *config) checkOneLeader() int {
 		}
 
 		if len(leaders) != 0 {
-			//fmt.Printf("Just one leader(%d)\n", leaders[lastTermWithLeader][0])
 			return leaders[lastTermWithLeader][0]
 		}
 	}
@@ -491,8 +487,6 @@ func (cfg *config) checkNoLeader() {
 			_, is_leader := cfg.rafts[i].GetState()
 			if is_leader {
 				cfg.t.Fatalf("expected no leader among connected servers, but %v claims to be leader", i)
-			} else {
-				fmt.Println("No leader")
 			}
 		}
 	}

@@ -32,7 +32,6 @@ func TestSendHeartBeat(t *testing.T) {
 	cfg.rafts[0].sendHeartBeatTo(1)
 	cfg.rafts[1].sendHeartBeatTo(2)
 	cfg.rafts[2].sendHeartBeatTo(0)
-
 }
 
 func (rf *Raft) RequestVoteWG(wg *sync.WaitGroup) {
@@ -44,23 +43,9 @@ func (rf *Raft) RequestVoteWG(wg *sync.WaitGroup) {
 	}()
 
 }
-func (rf *Raft) sendAppendEntriesWG(server int, wg *sync.WaitGroup) {
-	go func() {
-		args := &AppendEntriesArgs{rf.currentTerm, rf.me, -1, -1, nil, rf.commitIndex}
-		reply := &AppendEntriesReply{}
-		rf.sendAppendEntriesRPC(server, args, reply)
-		//if !ok {
-		//	log.Printf("fail")
-		//} else {
-		//	log.Printf("success")
-		//}
-		wg.Done()
-	}()
-
-}
 
 func Test_RequestVote_Response_TIME_NonLock(t *testing.T) {
-	times := 100
+	times := 1
 
 	s := time.Now()
 	for i := 0; i < times; i++ {
@@ -95,7 +80,7 @@ func TestRaft_AppendEntries(t *testing.T) {
 		{
 			name: "Normal heartBeat",
 			args: args{
-				rf:    &Raft{me: 0, currentTerm: 1, log: []*LogEntry{{0, 0, nil}}},
+				rf:    &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 1, log: []*LogEntry{{0, 0, nil}}},
 				args:  &AppendEntriesArgs{LeaderTerm: 1, LeaderId: 100},
 				reply: &AppendEntriesReply{},
 			},
@@ -104,7 +89,7 @@ func TestRaft_AppendEntries(t *testing.T) {
 		{
 			name: "Receive heartBeat from leader in previous terms",
 			args: args{
-				rf:    &Raft{me: 0, currentTerm: 2},
+				rf:    &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 2},
 				args:  &AppendEntriesArgs{LeaderTerm: 1, LeaderId: 100},
 				reply: &AppendEntriesReply{},
 			},
@@ -113,7 +98,7 @@ func TestRaft_AppendEntries(t *testing.T) {
 		{
 			name: "PreEntry non-exist01",
 			args: args{
-				rf: &Raft{me: 0, currentTerm: 2,
+				rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 2,
 					log: []*LogEntry{{0, 0, nil}, {1, 1, nil}, {1, 2, nil}, {1, 3, nil}}},
 				args: &AppendEntriesArgs{LeaderTerm: 2, LeaderId: 100, PrevLogIndex: 4, PrevLogTerm: 3,
 					Entries: []*LogEntry{{4, 5, nil}}},
@@ -124,7 +109,7 @@ func TestRaft_AppendEntries(t *testing.T) {
 		{
 			name: "PreEntry non-exist02",
 			args: args{
-				rf: &Raft{me: 0, currentTerm: 2,
+				rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 2,
 					log: []*LogEntry{{0, 0, nil}, {1, 1, nil}, {2, 2, nil}}},
 				args: &AppendEntriesArgs{LeaderTerm: 2, LeaderId: 100, PrevLogIndex: 4, PrevLogTerm: 3,
 					Entries: []*LogEntry{{4, 5, nil}}},
@@ -135,7 +120,18 @@ func TestRaft_AppendEntries(t *testing.T) {
 		{
 			name: "Follower no logs",
 			args: args{
-				rf: &Raft{me: 0, currentTerm: 2,
+				rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 2,
+					log: []*LogEntry{{0, 0, nil}}},
+				args: &AppendEntriesArgs{LeaderTerm: 2, LeaderId: 100, PrevLogIndex: 4, PrevLogTerm: 3,
+					Entries: []*LogEntry{{4, 5, nil}}},
+				reply: &AppendEntriesReply{},
+			},
+			want: &AppendEntriesReply{Term: 2, ConflictIndex: 1},
+		},
+		{
+			name: "Follower no logs",
+			args: args{
+				rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 2,
 					log: []*LogEntry{{0, 0, nil}}},
 				args: &AppendEntriesArgs{LeaderTerm: 2, LeaderId: 100, PrevLogIndex: 4, PrevLogTerm: 3,
 					Entries: []*LogEntry{{4, 5, nil}}},
@@ -241,25 +237,25 @@ func TestRaft_checkCommit(t *testing.T) {
 	}{
 		{
 			name: "1",
-			rf: &Raft{me: 0, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: make([]*LogEntry, 5),
+			rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: make([]*LogEntry, 5),
 				matchIndex: []int64{10, 3, 3, 1, 0}},
 			want: 3,
 		},
 		{
 			name: "2",
-			rf: &Raft{me: 0, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: make([]*LogEntry, 5),
+			rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: make([]*LogEntry, 5),
 				matchIndex: []int64{10, 6, 4, 1, 0}},
 			want: 4,
 		},
 		{
 			name: "3",
-			rf: &Raft{me: 0, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: make([]*LogEntry, 5),
+			rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: make([]*LogEntry, 5),
 				matchIndex: []int64{10, 6, 2, 1, 0}},
 			want: 2,
 		},
 		{
 			name: "4",
-			rf: &Raft{me: 0, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: make([]*LogEntry, 5),
+			rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: make([]*LogEntry, 5),
 				matchIndex: []int64{10, 2, 2, 1, 0}},
 			want: 2,
 		},

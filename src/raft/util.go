@@ -22,20 +22,8 @@ func MaxInt(num1, num2 int) int {
 	}
 	return num2
 }
-func MaxInt64(num1, num2 int64) int64 {
-	if num1 > num2 {
-		return num1
-	}
-	return num2
-}
 
 func MinInt(num1, num2 int) int {
-	if num1 > num2 {
-		return num2
-	}
-	return num1
-}
-func MinInt64(num1, num2 int64) int64 {
 	if num1 > num2 {
 		return num2
 	}
@@ -48,10 +36,18 @@ func getRandTime(start, end int) time.Duration {
 }
 
 func (log1 *LogEntry) compare(log2 *LogEntry) int {
+
 	return compareLog(log1.Term, log2.Term, log1.Index, log2.Index)
 }
 
-func compareLog(term1, term2 int, index1, index2 int64) int {
+func (log1 *LogEntry) equals(log2 *LogEntry) bool {
+	if log1 == nil || log2 == nil {
+		return false
+	}
+	return log1.Term == log2.Term && log1.Index == log2.Index
+}
+
+func compareLog(term1, term2 int, index1, index2 int) int {
 	if term1 != term2 {
 		return term1 - term2
 	}
@@ -63,7 +59,19 @@ func compareLogs(e1, e2 []*LogEntry) bool {
 		return false
 	}
 	for i := 0; i < len(e1); i++ {
-		if e1[i].compare(e2[i]) != 0 {
+		if !e1[i].equals(e2[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func compareArr(e1, e2 []int) bool {
+	if len(e1) != len(e2) {
+		return false
+	}
+	for i := 0; i < len(e1); i++ {
+		if e1[i] != (e2[i]) {
 			return false
 		}
 	}
