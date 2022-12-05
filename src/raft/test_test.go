@@ -529,7 +529,7 @@ func TestBackup2B(t *testing.T) {
 	cfg := make_config(t, servers, false, false)
 	defer cfg.cleanup()
 
-	cfg.begin("Test (2B): rf backs up quickly over incorrect follower logs")
+	cfg.begin("Test (2B): rf backs up quickly over incorrect follower commitLogs")
 
 	cfg.one(rand.Int(), servers, true)
 
@@ -538,14 +538,15 @@ func TestBackup2B(t *testing.T) {
 	cfg.disconnect((leader1 + 2) % servers)
 	cfg.disconnect((leader1 + 3) % servers)
 	cfg.disconnect((leader1 + 4) % servers)
-	for i, log := range cfg.logs {
-		if len(log) != 1 {
-			t.Fatalf("%d", i)
-		}
-	}
+
 	// submit lots of commands that won't commit
 	for i := 0; i < 50; i++ {
 		cfg.rafts[leader1].Start(rand.Int())
+	}
+	for i, log := range cfg.commitLogs {
+		if len(log) != 1 {
+			t.Fatalf("%d", i)
+		}
 	}
 
 	time.Sleep(RaftElectionTimeout * 2)
@@ -553,14 +554,9 @@ func TestBackup2B(t *testing.T) {
 	cfg.disconnect((leader1 + 0) % servers)
 	cfg.disconnect((leader1 + 1) % servers)
 
-	for i := 0; i <= 1; i++ {
-		if cfg.rafts[(leader1+i)%servers].getLastIndex() != 51 {
-			t.Fatalf("%d", i)
-		}
-	}
 	// check one log commit
-	for i := 0; i < servers; i++ {
-		if len(cfg.logs[i]) != 1 {
+	for i, log := range cfg.commitLogs {
+		if len(log) != 1 {
 			t.Fatalf("%d", i)
 		}
 	}
@@ -576,7 +572,6 @@ func TestBackup2B(t *testing.T) {
 
 	// now another partitioned rf and one follower
 	leader2 := cfg.checkOneLeader()
-
 	other := (leader1 + 2) % servers
 	if leader2 == other {
 		other = (leader2 + 1) % servers
@@ -586,6 +581,11 @@ func TestBackup2B(t *testing.T) {
 	// lots more commands that won't commit
 	for i := 0; i < 50; i++ {
 		cfg.rafts[leader2].Start(rand.Int())
+	}
+	for i := 2; i <= 4; i++ {
+		if len(cfg.commitLogs[(leader1+2)%servers]) != 51 {
+			t.Fatalf("%d", i)
+		}
 	}
 
 	time.Sleep(RaftElectionTimeout / 2)
@@ -738,15 +738,15 @@ func TestPersist12C(t *testing.T) {
 		cfg.connect(i)
 	}
 	// code of me
+
+	cfg.one(12, servers, true)
 	for i := 0; i < servers; i++ {
 		if cfg.rafts[i].log[1].Command != 11 {
 			t.Fatalf("")
 		}
 	}
-
-	cfg.one(12, servers, true)
-
 	leader1 := cfg.checkOneLeader()
+	time.Sleep(time.Millisecond * 100)
 	// code of me
 	for i := 0; i < servers; i++ {
 		if cfg.rafts[i].log[2].Command != 12 {
@@ -820,37 +820,37 @@ func TestPersist22C(t *testing.T) {
 		cfg.connect((leader1 + 2) % servers)
 
 		time.Sleep(RaftElectionTimeout)
-		//// 0x 1 2 3x 4x
-		//// 2  1 1 2  2
-		//for i := 0; i < servers; i++ {
-		//	if i == (leader1+1)%servers || i == (leader1+2)%servers {
-		//		if cfg.rafts[i].getLastIndex()-logCount[i] != 1 {
-		//			t.Fatalf("")
-		//		}
-		//	} else {
-		//		if cfg.rafts[i].getLastIndex()-logCount[i] != 2 {
-		//			t.Fatalf("")
-		//		}
-		//	}
-		//}
+		//0x 1 2 3x 4x
+		//2  1 1 2  2
+		for i := 0; i < servers && iters == 0; i++ {
+			if i == (leader1+1)%servers || i == (leader1+2)%servers {
+				if cfg.rafts[i].getLastIndex()-logCount[i] != 1 {
+					t.Fatalf("")
+				}
+			} else {
+				if cfg.rafts[i].getLastIndex()-logCount[i] != 2 {
+					t.Fatalf("")
+				}
+			}
+		}
 		cfg.start1((leader1+3)%servers, cfg.applier)
 		cfg.connect((leader1 + 3) % servers)
 
 		cfg.one(10+index, servers-2, true)
 		index++
 
-		// 0x 1 2 3 4x
-		// 2  3 3 3  2
-		//for i := 0; i < servers; i++ {
-		//	if i == (leader1+0)%servers || i == (leader1+4)%servers {
-		//		if cfg.rafts[i].getLastIndex()-logCount[i] != 2 {
-		//			t.Fatalf("")
-		//		}
-		//	} else if cfg.rafts[i].getLastIndex()-logCount[i] != 3 {
-		//		t.Fatalf("")
-		//
-		//	}
-		//}
+		//0x 1 2 3 4x
+		//2  3 3 3  2
+		for i := 0; i < servers && iters == 0; i++ {
+			if i == (leader1+0)%servers || i == (leader1+4)%servers {
+				if cfg.rafts[i].getLastIndex()-logCount[i] != 2 {
+					t.Fatalf("")
+				}
+			} else if cfg.rafts[i].getLastIndex()-logCount[i] != 3 {
+				t.Fatalf("")
+
+			}
+		}
 		cfg.connect((leader1 + 4) % servers)
 		cfg.connect((leader1 + 0) % servers)
 	}

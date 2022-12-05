@@ -48,7 +48,7 @@ type config struct {
 	connected   []bool   // whether each server is on the net
 	saved       []*Persister
 	endnames    [][]string            // the port file names each sends to
-	logs        []map[int]interface{} // copy of each server's committed entries
+	commitLogs  []map[int]interface{} // copy of each server's committed entries
 	lastApplied []int
 	start       time.Time // time at which make_config() was called
 	// begin()/end() statistics
@@ -79,7 +79,7 @@ func make_config(t *testing.T, n int, unreliable bool, snapshot bool) *config {
 	cfg.connected = make([]bool, cfg.n)
 	cfg.saved = make([]*Persister, cfg.n)
 	cfg.endnames = make([][]string, cfg.n)
-	cfg.logs = make([]map[int]interface{}, cfg.n)
+	cfg.commitLogs = make([]map[int]interface{}, cfg.n)
 	cfg.lastApplied = make([]int, cfg.n)
 	cfg.start = time.Now()
 
@@ -93,7 +93,7 @@ func make_config(t *testing.T, n int, unreliable bool, snapshot bool) *config {
 	}
 	// create a full set of Rafts.
 	for i := 0; i < cfg.n; i++ {
-		cfg.logs[i] = map[int]interface{}{}
+		cfg.commitLogs[i] = map[int]interface{}{}
 		cfg.start1(i, applier)
 	}
 
@@ -140,16 +140,17 @@ func (cfg *config) crash1(i int) {
 func (cfg *config) checkLogs(i int, m ApplyMsg) (string, bool) {
 	err_msg := ""
 	v := m.Command
-	for j := 0; j < len(cfg.logs); j++ {
-		if old, oldok := cfg.logs[j][m.CommandIndex]; oldok && old != v {
-			log.Printf("%v: log %v; server %v\n", i, cfg.logs[i], cfg.logs[j])
+	for j := 0; j < len(cfg.commitLogs); j++ {
+		if old, oldok := cfg.commitLogs[j][m.CommandIndex]; oldok && old != v {
 			// some server has already committed a different value for this entry!
-			err_msg = fmt.Sprintf("commit index=%v server=%v %v != server=%v %v",
-				m.CommandIndex, i, m.Command, j, old)
+			fmt.Printf("server %d: %v\n", i, cfg.rafts[i].log)
+			fmt.Printf("server %d: %v\n", j, cfg.rafts[j].log)
+			err_msg = fmt.Sprintf("server(%v:'%v') != server(%v: '%v')",
+				i, cfg.rafts[i].getEntry(m.CommandIndex), j, cfg.rafts[j].getEntry(m.CommandIndex))
 		}
 	}
-	_, prevok := cfg.logs[i][m.CommandIndex-1]
-	cfg.logs[i][m.CommandIndex] = v
+	_, prevok := cfg.commitLogs[i][m.CommandIndex-1]
+	cfg.commitLogs[i][m.CommandIndex] = v
 	if m.CommandIndex > cfg.maxIndex {
 		cfg.maxIndex = m.CommandIndex
 	}
@@ -198,9 +199,9 @@ func (cfg *config) ingestSnap(i int, snapshot []byte, index int) string {
 		err := fmt.Sprintf("server %v snapshot doesn't match m.SnapshotIndex", i)
 		return err
 	}
-	cfg.logs[i] = map[int]interface{}{}
+	cfg.commitLogs[i] = map[int]interface{}{}
 	for j := 0; j < len(xlog); j++ {
-		cfg.logs[i][j] = xlog[j]
+		cfg.commitLogs[i][j] = xlog[j]
 	}
 	cfg.lastApplied[i] = lastIncludedIndex
 	return ""
@@ -250,7 +251,7 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 				e.Encode(m.CommandIndex)
 				var xlog []interface{}
 				for j := 0; j <= m.CommandIndex; j++ {
-					xlog = append(xlog, cfg.logs[i][j])
+					xlog = append(xlog, cfg.commitLogs[i][j])
 				}
 				e.Encode(xlog)
 				rf.Snapshot(m.CommandIndex, w.Bytes())
@@ -358,7 +359,7 @@ func (cfg *config) cleanup() {
 
 // attach server i to the net.
 func (cfg *config) connect(i int) {
-	// fmt.Printf("connect(%d)\n", i)
+	fmt.Printf("connect(%d)\n", i)
 
 	cfg.connected[i] = true
 
@@ -381,7 +382,7 @@ func (cfg *config) connect(i int) {
 
 // detach server i from the net.
 func (cfg *config) disconnect(i int) {
-	// fmt.Printf("disconnect(%d)\n", i)
+	fmt.Printf("disconnect(%d)\n", i)
 
 	cfg.connected[i] = false
 
@@ -502,7 +503,7 @@ func (cfg *config) nCommitted(index int) (int, interface{}) {
 		}
 
 		cfg.mu.Lock()
-		cmd1, ok := cfg.logs[i][index]
+		cmd1, ok := cfg.commitLogs[i][index]
 		cfg.mu.Unlock()
 
 		if ok {
@@ -563,6 +564,7 @@ func (cfg *config) wait(index int, n int, startTerm int) interface{} {
 func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 	t0 := time.Now()
 	starts := 0
+	finalIndex := -1
 	for time.Since(t0).Seconds() < 10 && cfg.checkFinished() == false {
 		// try all the servers, maybe one is the leader.
 		index := -1
@@ -587,8 +589,11 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 			// somebody claimed to be the leader and to have
 			// submitted our command; wait a while for agreement.
 			t1 := time.Now()
+			nd := 1
+			cmd1 := cmd
 			for time.Since(t1).Seconds() < 2 {
-				nd, cmd1 := cfg.nCommitted(index)
+				time.Sleep(20 * time.Millisecond)
+				nd, cmd1 = cfg.nCommitted(index)
 				if nd > 0 && nd >= expectedServers {
 					// committed
 					if cmd1 == cmd {
@@ -596,17 +601,25 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 						return index
 					}
 				}
-				time.Sleep(20 * time.Millisecond)
 			}
+			for _, l := range cfg.commitLogs {
+				fmt.Println(l)
+			}
+			fmt.Printf("one(%d: %v) count=%d,failed to reach agreement\n", finalIndex, cmd, nd)
+
 			if retry == false {
 				cfg.t.Fatalf("one(%v) failed to reach agreement", cmd)
 			}
 		} else {
 			time.Sleep(50 * time.Millisecond)
 		}
+		finalIndex = index
 	}
 	if cfg.checkFinished() == false {
-		cfg.t.Fatalf("one(%v) failed to reach agreement", cmd)
+		for _, l := range cfg.commitLogs {
+			fmt.Println(l)
+		}
+		cfg.t.Fatalf("one(%d: %v) failed to reach agreement", finalIndex, cmd)
 	}
 	return -1
 }

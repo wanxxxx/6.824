@@ -24,25 +24,15 @@ func TestRequestVoteTwice(t *testing.T) {
 	}
 }
 
-func TestSendHeartBeat(t *testing.T) {
-	servers := 3
-	cfg := make_config(t, servers, false, false)
-	defer cfg.cleanup()
-	time.Sleep(time.Second * 10)
-	cfg.rafts[0].sendHeartBeatTo(1)
-	cfg.rafts[1].sendHeartBeatTo(2)
-	cfg.rafts[2].sendHeartBeatTo(0)
-}
-
-func (rf *Raft) RequestVoteWG(wg *sync.WaitGroup) {
-	go func() {
-		args := &RequestVoteArgs{100, 100, -1, -1}
-		reply := &RequestVoteReply{}
-		rf.RequestVote(args, reply)
-		wg.Done()
-	}()
-
-}
+//func TestSendHeartBeat(t *testing.T) {
+//	servers := 3
+//	cfg := make_config(t, servers, false, false)
+//	defer cfg.cleanup()
+//	time.Sleep(time.Second * 10)
+//	cfg.rafts[0].sendHeartBeatTo(1)
+//	cfg.rafts[1].sendHeartBeatTo(2)
+//	cfg.rafts[2].sendHeartBeatTo(0)
+//}
 
 func Test_RequestVote_Response_TIME_NonLock(t *testing.T) {
 	times := 1
@@ -55,7 +45,7 @@ func Test_RequestVote_Response_TIME_NonLock(t *testing.T) {
 		rf.RequestVote(args, reply)
 	}
 	elapsed := time.Now().Sub(s)
-	t.Logf("Average RequestVote without lock runtime is %v us\n", float64(elapsed.Microseconds())/float64(times))
+	fmt.Printf("Average RequestVote without lock runtime is %v us\n", float64(elapsed.Microseconds())/float64(times))
 
 }
 
@@ -118,7 +108,7 @@ func TestRaft_AppendEntries(t *testing.T) {
 			want: &AppendEntriesReply{Term: 2, ConflictIndex: 2},
 		},
 		{
-			name: "Follower no logs",
+			name: "Follower no commitLogs",
 			args: args{
 				rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 2,
 					log: []*LogEntry{{0, 0, nil}}},
@@ -129,7 +119,7 @@ func TestRaft_AppendEntries(t *testing.T) {
 			want: &AppendEntriesReply{Term: 2, ConflictIndex: 1},
 		},
 		{
-			name: "Follower no logs",
+			name: "Follower no commitLogs",
 			args: args{
 				rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 2,
 					log: []*LogEntry{{0, 0, nil}}},
@@ -153,62 +143,56 @@ func TestRaft_AppendEntries(t *testing.T) {
 }
 
 func TestRaft_AppendEntries1(t *testing.T) {
-	args := &AppendEntriesArgs{
-		LeaderTerm:   1,
-		LeaderId:     1,
-		PrevLogIndex: 0,
-		PrevLogTerm:  0}
+	tests := []struct {
+		name       string
+		rfLog      []*LogEntry
+		argEntries []*LogEntry
+		want       []*LogEntry
+	}{
+		// TODO: Add test cases.
+		{
+			name:       "Test1 Fail, i <len, j < len",
+			rfLog:      []*LogEntry{{0, 0, nil}, {1, 1, nil}, {1, 2, nil}, {1, 3, nil}},
+			argEntries: []*LogEntry{{1, 1, nil}, {2, 2, nil}},
+			want:       []*LogEntry{{0, 0, nil}, {1, 1, nil}, {2, 2, nil}},
+		},
+		{
+			name:       "Test2 Fail, i <len, j < len",
+			rfLog:      []*LogEntry{{0, 0, nil}, {1, 1, nil}, {1, 2, nil}, {1, 3, nil}},
+			argEntries: []*LogEntry{{1, 1, nil}, {100, 2, nil}, {100, 3, nil}, {100, 4, nil}},
+			want:       []*LogEntry{{0, 0, nil}, {1, 1, nil}, {100, 2, nil}, {100, 3, nil}, {100, 4, nil}},
+		},
+		{
+			name:       "Test3 Fail, i == len, j < len",
+			rfLog:      []*LogEntry{{0, 0, nil}, {1, 1, nil}, {1, 2, nil}, {1, 3, nil}},
+			argEntries: []*LogEntry{{1, 1, nil}, {1, 2, nil}},
+			want:       []*LogEntry{{0, 0, nil}, {1, 1, nil}, {1, 2, nil}, {1, 3, nil}},
+		},
+		{
+			name:       "Test4 Fail, i < len, j == len",
+			rfLog:      []*LogEntry{{0, 0, nil}, {1, 1, nil}, {1, 2, nil}, {1, 3, nil}},
+			argEntries: []*LogEntry{{1, 1, nil}, {1, 2, nil}, {1, 3, nil}, {1, 4, nil}, {1, 5, nil}},
+			want:       []*LogEntry{{0, 0, nil}, {1, 1, nil}, {1, 2, nil}, {1, 3, nil}, {1, 4, nil}, {1, 5, nil}},
+		},
+		{
+			name:       "Test5 success, i == len, j == len",
+			rfLog:      []*LogEntry{{0, 0, nil}, {1, 1, nil}, {1, 2, nil}, {1, 3, nil}},
+			argEntries: []*LogEntry{{1, 1, nil}, {1, 2, nil}, {1, 3, nil}},
+			want:       []*LogEntry{{0, 0, nil}, {1, 1, nil}, {1, 2, nil}, {1, 3, nil}},
+		},
+	}
+	rf := &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 1, log: []*LogEntry{{0, 0, nil}}}
+	args := &AppendEntriesArgs{LeaderTerm: 1, LeaderId: 100}
 	reply := &AppendEntriesReply{}
-	rf := initRaft(nil, 2, nil, nil)
-
-	rf.log = []*LogEntry{{0, 0, nil}, {1, 1, nil}, {1, 2, nil}, {1, 3, nil}}
-	args.Entries = []*LogEntry{{1, 1, nil}, {2, 2, nil}}
-	fmt.Printf("leni=%d, lenj=%d\n", len(args.Entries), len(rf.log))
-	rf.AppendEntries(args, reply)
-	if rf.log[2].Term != args.Entries[1].Term || len(rf.log) != 3 {
-		t.Error("Test1 Fail, i <len, j < len")
-	} else {
-		t.Log("Test1 success, i <len, j < len")
-	}
-
-	rf.log = []*LogEntry{{0, 0, nil}, {1, 1, nil}, {1, 2, nil}, {1, 3, nil}}
-	args.Entries = []*LogEntry{{1, 1, nil}, {100, 2, nil}, {100, 3, nil}, {100, 4, nil}}
-	fmt.Printf("leni=%d, lenj=%d\n", len(args.Entries), len(rf.log))
-	rf.AppendEntries(args, reply)
-	if rf.log[2].Term != args.Entries[1].Term || len(rf.log) != 5 || rf.log[4].Term != 100 {
-		t.Error("Test2 Fail, i <len, j < len")
-	} else {
-		t.Log("Test2 success, i <len, j < len")
-	}
-
-	rf.log = []*LogEntry{{0, 0, nil}, {1, 1, nil}, {1, 2, nil}, {1, 3, nil}}
-	args.Entries = []*LogEntry{{1, 1, nil}, {1, 2, nil}}
-	fmt.Printf("leni=%d, lenj=%d\n", len(args.Entries), len(rf.log))
-	rf.AppendEntries(args, reply)
-	if rf.log[2].Term != args.Entries[1].Term || len(rf.log) != 4 {
-		t.Error("Test3 Fail, i == len, j < len")
-	} else {
-		t.Log("Test3 success, i == len, j < len")
-	}
-
-	rf.log = []*LogEntry{{0, 0, nil}, {1, 1, nil}, {1, 2, nil}, {1, 3, nil}}
-	args.Entries = []*LogEntry{{1, 1, nil}, {1, 2, nil}, {1, 3, nil}, {1, 4, nil}, {1, 5, nil}}
-	fmt.Printf("leni=%d, lenj=%d\n", len(args.Entries), len(rf.log))
-	rf.AppendEntries(args, reply)
-	if rf.log[5].Term != args.Entries[4].Term || len(rf.log) != 6 {
-		t.Error("Test4 Fail, i < len, j == len")
-	} else {
-		t.Log("Test4 success, i < len, j == len")
-	}
-
-	rf.log = []*LogEntry{{0, 0, nil}, {1, 1, nil}, {1, 2, nil}, {1, 3, nil}}
-	args.Entries = []*LogEntry{{1, 1, nil}, {1, 2, nil}, {1, 3, nil}}
-	fmt.Printf("leni=%d, lenj=%d\n", len(args.Entries), len(rf.log))
-	rf.AppendEntries(args, reply)
-	if rf.log[3].Term != args.Entries[2].Term || len(rf.log) != 4 {
-		t.Error("Test5 Fail, i == len, j == len")
-	} else {
-		t.Log("Test5 success, i == len, j == len")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rf.log = tt.rfLog
+			args.Entries = tt.argEntries
+			rf.AppendEntries(args, reply)
+			if got := rf.log; !compareLogs(got, tt.want) {
+				t.Errorf("got = %v, want %v\n", got, tt.want)
+			}
+		})
 	}
 
 }
@@ -237,25 +221,25 @@ func TestRaft_checkCommit(t *testing.T) {
 	}{
 		{
 			name: "1",
-			rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: make([]*LogEntry, 5),
+			rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: []*LogEntry{{1, 2, nil}, {1, 3, 101}, {1, 4, 102}},
 				matchIndex: []int64{10, 3, 3, 1, 0}},
 			want: 3,
 		},
 		{
 			name: "2",
-			rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: make([]*LogEntry, 5),
+			rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: []*LogEntry{{1, 2, nil}, {1, 3, 101}, {1, 4, 102}},
 				matchIndex: []int64{10, 6, 4, 1, 0}},
 			want: 4,
 		},
 		{
 			name: "3",
-			rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: make([]*LogEntry, 5),
+			rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: []*LogEntry{{1, 2, nil}, {1, 3, 101}, {1, 4, 102}},
 				matchIndex: []int64{10, 6, 2, 1, 0}},
 			want: 2,
 		},
 		{
 			name: "4",
-			rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: make([]*LogEntry, 5),
+			rf: &Raft{me: 0, muMap: map[string]*sync.Mutex{}, commitIndex: 2, state: LEADER, peers: make([]*labrpc.ClientEnd, 5), log: []*LogEntry{{1, 2, nil}, {1, 3, 101}, {1, 4, 102}},
 				matchIndex: []int64{10, 2, 2, 1, 0}},
 			want: 2,
 		},
@@ -270,6 +254,7 @@ func TestRaft_checkCommit(t *testing.T) {
 		})
 	}
 }
+
 func TestRaft_persist01(t *testing.T) {
 
 	w := new(bytes.Buffer)
@@ -317,10 +302,9 @@ func TestRaft_persist02(t *testing.T) {
 				t.Errorf("currentTerm")
 			}
 			if tt.rf.voteFor != voteFor {
-
 				t.Errorf("voteFor")
 			}
-			if compareLogs(tt.rf.log, log) {
+			if !compareLogs(tt.rf.log, log) {
 				t.Errorf("log")
 			}
 		})
