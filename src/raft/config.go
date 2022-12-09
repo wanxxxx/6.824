@@ -143,8 +143,8 @@ func (cfg *config) checkLogs(i int, m ApplyMsg) (string, bool) {
 	for j := 0; j < len(cfg.commitLogs); j++ {
 		if old, oldok := cfg.commitLogs[j][m.CommandIndex]; oldok && old != v {
 			// some server has already committed a different value for this entry!
-			fmt.Printf("server %d: %v\n", i, cfg.rafts[i].log)
-			fmt.Printf("server %d: %v\n", j, cfg.rafts[j].log)
+			fmt.Printf("server %d: %v\n", i, cfg.commitLogs[i])
+			fmt.Printf("server %d: %v\n", j, cfg.commitLogs[j])
 			err_msg = fmt.Sprintf("server(%v:'%v') != server(%v: '%v')",
 				i, cfg.rafts[i].getEntry(m.CommandIndex), j, cfg.rafts[j].getEntry(m.CommandIndex))
 		}
@@ -204,6 +204,7 @@ func (cfg *config) ingestSnap(i int, snapshot []byte, index int) string {
 		cfg.commitLogs[i][j] = xlog[j]
 	}
 	cfg.lastApplied[i] = lastIncludedIndex
+	fmt.Printf("server%d apply %d by snapshot\n", i, lastIncludedIndex)
 	return ""
 }
 
@@ -242,7 +243,10 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 			}
 
 			cfg.mu.Lock()
-			cfg.lastApplied[i] = m.CommandIndex
+			if cfg.lastApplied[i] < m.CommandIndex {
+				cfg.lastApplied[i] = m.CommandIndex
+				fmt.Printf("server%d apply %d by sending cmd\n", i, m.CommandIndex)
+			}
 			cfg.mu.Unlock()
 
 			if (m.CommandIndex+1)%SnapShotInterval == 0 {
@@ -337,7 +341,7 @@ func (cfg *config) start1(i int, applier func(int, chan ApplyMsg)) {
 func (cfg *config) checkTimeout() {
 	// enforce a two minute real-time limit on each test
 	if !cfg.t.Failed() && time.Since(cfg.start) > 120*time.Second {
-		cfg.t.Fatal("test took longer than 120 seconds")
+		cfg.t.Fatal("test took longer than 240 seconds")
 	}
 }
 

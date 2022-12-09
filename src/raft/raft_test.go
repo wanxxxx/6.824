@@ -10,17 +10,78 @@ import (
 	"time"
 )
 
-func TestRequestVoteTwice(t *testing.T) {
+type wantS struct {
+	term    int
+	voteFor int
+	reply   *RequestVoteReply
+}
 
-	rafts := make([]*Raft, 3)
-	for i := 0; i < 3; i++ {
-		rafts[i] = initRaft(make([]*labrpc.ClientEnd, 3), i, nil, nil)
+func (w *wantS) equals(w2 *wantS) bool {
+	if w.term == w2.term && w.voteFor == w2.voteFor && w.reply.VoteGranted == w2.reply.VoteGranted && w.reply.Term == w2.reply.Term {
+		return true
 	}
+	return false
+}
+func Test_RequestVote(t *testing.T) {
 
-	for i := 0; i < 2; i++ {
-		args := &RequestVoteArgs{rafts[i].currentTerm, rafts[i].me, -1, -1}
-		reply := &RequestVoteReply{}
-		rafts[2].RequestVote(args, reply)
+	tests := []struct {
+		name  string
+		rf    *Raft
+		args  *RequestVoteArgs
+		reply *RequestVoteReply
+		want  *wantS
+	}{
+		{
+			name:  "Vote for higher term and not vote",
+			args:  &RequestVoteArgs{10, 0, 0, 0},
+			reply: &RequestVoteReply{},
+			rf:    &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 0, voteFor: -1, log: []*LogEntry{{0, 0, nil}}},
+			want:  &wantS{10, 0, &RequestVoteReply{10, true}},
+		},
+		{
+			name:  "Vote for higher term and already voted before",
+			args:  &RequestVoteArgs{10, 0, 0, 0},
+			reply: &RequestVoteReply{},
+			rf:    &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 0, voteFor: 10, log: []*LogEntry{{0, 0, nil}}},
+			want:  &wantS{10, 0, &RequestVoteReply{10, true}},
+		},
+		{
+			name:  "Vote for same term and not vote",
+			args:  &RequestVoteArgs{1, 0, 0, 0},
+			reply: &RequestVoteReply{},
+			rf:    &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 1, voteFor: -1, log: []*LogEntry{{0, 0, nil}}},
+			want:  &wantS{1, 0, &RequestVoteReply{1, true}},
+		},
+		{
+			name:  "Vote for same term and already voted before",
+			args:  &RequestVoteArgs{1, 0, 0, 0},
+			reply: &RequestVoteReply{},
+			rf:    &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 1, voteFor: 10, log: []*LogEntry{{0, 0, nil}}},
+			want:  &wantS{1, 10, &RequestVoteReply{1, false}},
+		},
+		{
+			name:  "Expire last log",
+			args:  &RequestVoteArgs{1, 0, 0, 0},
+			reply: &RequestVoteReply{},
+			rf:    &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 1, voteFor: 10, log: []*LogEntry{{1, 1, nil}}},
+			want:  &wantS{1, 10, &RequestVoteReply{1, false}},
+		},
+		{
+			name:  "lower term",
+			args:  &RequestVoteArgs{1, 0, 1, 1},
+			reply: &RequestVoteReply{},
+			rf:    &Raft{me: 0, muMap: map[string]*sync.Mutex{}, currentTerm: 10, voteFor: 10, log: []*LogEntry{{0, 0, nil}}},
+			want:  &wantS{10, 10, &RequestVoteReply{10, false}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.rf.RequestVote(tt.args, tt.reply)
+			got := wantS{tt.rf.currentTerm, tt.rf.voteFor, tt.reply}
+			if !got.equals(tt.want) {
+				t.Errorf("got:%v, want:%v\n", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -306,6 +367,70 @@ func TestRaft_persist02(t *testing.T) {
 			}
 			if !compareLogs(tt.rf.log, log) {
 				t.Errorf("log")
+			}
+		})
+	}
+}
+
+func TestRaft_updatePersistSate(t *testing.T) {
+	type fields struct {
+		muMap            map[string]*sync.Mutex
+		peers            []*labrpc.ClientEnd
+		persister        *Persister
+		me               int
+		dead             int32
+		currentTerm      int
+		log              []*LogEntry
+		voteFor          int
+		commitIndex      int64
+		lastAppliedIndex int64
+		nextIndex        []int64
+		matchIndex       []int64
+		voteCount        int64
+		applyCh          chan ApplyMsg
+		lastHeartbeat    time.Time
+		state            int
+		snapshot         []byte
+		lastIndex        int64
+	}
+	type args struct {
+		currentTerm int
+		voteFor     int
+		log         []*LogEntry
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   bool
+	}{
+		// TODO: Add test cases.
+
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rf := &Raft{
+				muMap:            tt.fields.muMap,
+				peers:            tt.fields.peers,
+				persister:        tt.fields.persister,
+				me:               tt.fields.me,
+				dead:             tt.fields.dead,
+				currentTerm:      tt.fields.currentTerm,
+				log:              tt.fields.log,
+				voteFor:          tt.fields.voteFor,
+				commitIndex:      tt.fields.commitIndex,
+				lastAppliedIndex: tt.fields.lastAppliedIndex,
+				nextIndex:        tt.fields.nextIndex,
+				matchIndex:       tt.fields.matchIndex,
+				voteCount:        tt.fields.voteCount,
+				applyCh:          tt.fields.applyCh,
+				lastHeartbeat:    tt.fields.lastHeartbeat,
+				state:            tt.fields.state,
+				snapshot:         tt.fields.snapshot,
+				lastIndex:        tt.fields.lastIndex,
+			}
+			if got := rf.updatePersistSate(tt.args.currentTerm, tt.args.voteFor, tt.args.log); got != tt.want {
+				t.Errorf("updatePersistSate() = %v, want %v", got, tt.want)
 			}
 		})
 	}

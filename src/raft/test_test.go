@@ -1298,21 +1298,21 @@ func TestSnapshotAllCrash2D(t *testing.T) {
 	for i := 0; i < iters; i++ {
 		// perhaps enough to get a snapshot
 		nn := (SnapShotInterval / 2) + (rand.Int() % SnapShotInterval)
-		for i := 0; i < nn; i++ {
+		for j := 0; j < nn; j++ {
 			cfg.one(rand.Int(), servers, true)
 		}
 
 		index1 := cfg.one(rand.Int(), servers, true)
 
 		// crash all
-		for i := 0; i < servers; i++ {
-			cfg.crash1(i)
+		for j := 0; j < servers; j++ {
+			cfg.crash1(j)
 		}
 
 		// revive all
-		for i := 0; i < servers; i++ {
-			cfg.start1(i, cfg.applierSnap)
-			cfg.connect(i)
+		for j := 0; j < servers; j++ {
+			cfg.start1(j, cfg.applierSnap)
+			cfg.connect(j)
 		}
 
 		index2 := cfg.one(rand.Int(), servers, true)
